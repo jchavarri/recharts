@@ -1164,7 +1164,7 @@ const generateCategoricalChart = ({
       let restProps;
       let cursorComp = Curve;
 
-      if (chartName === 'ScatterChart') {
+      if (chartName === 'ScatterChart' || chartName === 'HeatmapChart') {
         restProps = activeCoordinate;
         cursorComp = Cross;
       } else if (chartName === 'BarChart') {
@@ -1509,6 +1509,7 @@ const generateCategoricalChart = ({
         Scatter: { handler: this.renderGraphicChild },
         Pie: { handler: this.renderGraphicChild },
         Funnel: { handler: this.renderGraphicChild },
+        Heatmap: { handler: this.renderGraphicChild },
         Tooltip: { handler: this.renderCursor, once: true },
         PolarGrid: { handler: this.renderPolarGrid, once: true },
         PolarAngleAxis: { handler: this.renderPolarAxis },

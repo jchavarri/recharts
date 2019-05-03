@@ -21,6 +21,7 @@ import PieChart from './PieChart';
 import ScatterChart from './ScatterChart';
 import RadarChart from './RadarChart';
 import RadialBarChart from './RadialBarChart';
+import Heatmap from './Heatmap';
 import Treemap from './Treemap';
 import Sankey from './Sankey';
 
@@ -39,6 +40,7 @@ export default {
     PieChart,
     RadarChart,
     RadialBarChart,
+    Heatmap,
     Treemap,
     Sankey,
     FunnelChart,
