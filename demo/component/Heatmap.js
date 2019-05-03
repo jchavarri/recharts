@@ -30,20 +30,6 @@ const colorScale = scaleLinear()
   .domain([0, 100])
   .range(['#eee', '#4B3F72']);
 
-function layout(data, width, height) {
-  const cellWidth = width / data[0].length;
-  const cellHeight = height / data.length;
-  return data.map((row, i) =>
-    row.map((d, j) => ({
-      x: j * cellWidth,
-      y: i * cellHeight,
-      w: cellWidth,
-      h: cellHeight,
-      fill: colorScale(d.z)
-    }))
-  );
-}
-
 @pureRender
 class Heatmap extends Component {
   static displayName = 'Heatmap';
@@ -165,45 +151,16 @@ class Heatmap extends Component {
     offset,
     xAxisTicks
   }) => {
-    const cells = findAllByType(item.props.children, Cell);
     const xAxisDataKey = _.isNil(xAxis.dataKey) ?
       item.props.dataKey : xAxis.dataKey;
     const yAxisDataKey = _.isNil(yAxis.dataKey) ? item.props.dataKey : yAxis.dataKey;
     const zAxisDataKey = zAxis && zAxis.dataKey;
-    const defaultRangeZ = zAxis ? zAxis.range : ZAxis.defaultProps.range;
-    const defaultZ = defaultRangeZ && defaultRangeZ[0];
     const xBandSize = xAxis.scale.bandwidth ? xAxis.scale.bandwidth() : 0;
     const yBandSize = yAxis.scale.bandwidth ? yAxis.scale.bandwidth() : 0;
-    const points = displayedData.map((entry, index) => {
-      const x = entry[xAxisDataKey];
-      const y = entry[yAxisDataKey];
-      const z = (!_.isNil(zAxisDataKey) && entry[zAxisDataKey]) || '-';
-      const tooltipPayload = [
-        {
-          name: xAxis.name || xAxis.dataKey,
-          unit: xAxis.unit || '',
-          value: x,
-          payload: entry,
-          dataKey: xAxisDataKey
-        },
-        {
-          name: yAxis.name || yAxis.dataKey,
-          unit: yAxis.unit || '',
-          value: y,
-          payload: entry,
-          dataKey: yAxisDataKey
-        }
-      ];
 
-      if (z !== '-') {
-        tooltipPayload.push({
-          name: zAxis.name || zAxis.dataKey,
-          unit: zAxis.unit || '',
-          value: z,
-          payload: entry,
-          dataKey: zAxisDataKey
-        });
-      }
+    const points = displayedData.map((entry, index) => {
+      const z = (!_.isNil(zAxisDataKey) && entry[zAxisDataKey]) || '-';
+
       const cx = getCateCoordinateOfLine({
         axis: xAxis,
         ticks: xAxisTicks,
@@ -220,26 +177,11 @@ class Heatmap extends Component {
         index,
         dataKey: yAxisDataKey
       });
-      const size = z !== '-' ? zAxis.scale(z) : defaultZ;
-      const radius = Math.sqrt(Math.max(size, 0) / Math.PI);
 
       return {
-        ...entry,
         cx,
         cy,
-        x: cx - radius,
-        y: cy - radius,
-        xAxis,
-        yAxis,
-        zAxis,
-        width: 2 * radius,
-        height: 2 * radius,
-        size,
-        node: { x, y, z },
-        tooltipPayload,
-        tooltipPosition: { x: cx, y: cy },
-        payload: entry,
-        ...(cells && cells[index] && cells[index].props)
+        z
       };
     });
 
@@ -256,6 +198,7 @@ class Heatmap extends Component {
 
     this.canvas = React.createRef();
     this.handleMouseMove = this.handleMouseMove.bind(this);
+    this.onEnterSquareDebounced = _.throttle(this.onEnterSquareDebounced, 160);
     this.handleMouseLeave = this.handleMouseLeave.bind(this);
   }
 
@@ -268,61 +211,72 @@ class Heatmap extends Component {
   }
 
   updateCanvas() {
-    const { data, width, height } = this.props;
-    console.log(this.props);
+    const { left, top, points, width, height, xAxis, yAxis } = this.props;
     const ctx = this.canvas.current.getContext('2d');
     ctx.clearRect(0, 0, width, height);
-    const renderedData = layout(data, width, height);
 
-    renderedData.forEach(row =>
-      row.forEach(d =>
-        rect({
-          ctx,
-          x: d.x,
-          y: d.y,
-          width: d.w,
-          height: d.h,
-          fill: d.fill
-        })
-      )
+    const cellWidth = width / xAxis.niceTicks[xAxis.niceTicks.length - 1];
+    const cellHeight = height / yAxis.niceTicks[yAxis.niceTicks.length - 1];
+
+    points.forEach(d =>
+      rect({
+        ctx,
+        x: d.cx - left,
+        y: d.cy - top,
+        width: cellWidth,
+        height: cellHeight,
+        fill: colorScale(d.z)
+      })
     );
   }
 
   handleMouseMove(event) {
-    const { xAxis, yAxis, zAxis, onMouseEnter, left, top } = this.props;
+    const { xAxis, yAxis, zAxis, left, top, width, height, points } = this.props;
     // TODO: zAxis needs to be passed as props from getComposedData
     const zAxis2 = zAxis || { name: 'keywords' };
     const bounds = event.target.getBoundingClientRect();
-    const x = Math.ceil(event.clientX - bounds.left);
-    const y = Math.ceil(event.clientY - bounds.top);
+    const cellWidth = width / xAxis.niceTicks[xAxis.niceTicks.length - 1];
+    const cellHeight = height / yAxis.niceTicks[yAxis.niceTicks.length - 1];
+    const xCoord = Math.ceil(event.clientX - bounds.left);
+    const yCoord = Math.ceil(event.clientY - bounds.top);
     const z = Math.ceil(Math.random() * 2000);
-    const tooltipPayload = [
-      {
-        name: xAxis.name || xAxis.dataKey,
-        unit: xAxis.unit || '',
-        value: x,
-        payload: null,
-        dataKey: null
-      },
-      {
-        name: yAxis.name || yAxis.dataKey,
-        unit: yAxis.unit || '',
-        value: y,
-        payload: null,
-        dataKey: null
-      },
-      {
-        name: zAxis2.name || zAxis2.dataKey,
-        unit: zAxis2.unit || '',
-        value: z,
-        payload: null,
-        dataKey: null
-      }
-    ];
-    onMouseEnter({
-      tooltipPayload,
-      tooltipPosition: { x: x + left, y: y + top }
-    });
+    const x = Math.round(xCoord / cellWidth);
+    const y = Math.round(yCoord / cellHeight);
+    if (this.hoveredX !== x || this.hoveredY !== y) {
+      this.hoveredX = x;
+      this.hoveredY = x;
+      const tooltipPayload = [
+        {
+          name: xAxis.name || xAxis.dataKey,
+          unit: xAxis.unit || '',
+          value: x,
+          payload: null,
+          dataKey: null
+        },
+        {
+          name: yAxis.name || yAxis.dataKey,
+          unit: yAxis.unit || '',
+          value: y,
+          payload: null,
+          dataKey: null
+        },
+        {
+          name: zAxis2.name || zAxis2.dataKey,
+          unit: zAxis2.unit || '',
+          value: z,
+          payload: null,
+          dataKey: null
+        }
+      ];
+      this.onEnterSquareDebounced({
+        tooltipPayload,
+        tooltipPosition: { x: xCoord + left, y: yCoord + top }
+      });
+    }
+  }
+
+  onEnterSquareDebounced(payload) {
+    this.props.onMouseEnter(payload);
   }
 
   handleMouseLeave() {
@@ -332,6 +286,7 @@ class Heatmap extends Component {
 
   render() {
     const { left, top, width, height } = this.props;
+
     return (
       <foreignObject width={width} height={height} x={left} y={top}>
         <canvas
@@ -359,22 +314,20 @@ const HeatmapChart = generateCategoricalChart({
 });
 
 function getData() {
-  const numRows = 90;
-  const numCols = 10;
+  const numRows = 185;
+  const numCols = 100;
   const data = [];
   for (let i = 0; i < numRows; i++) {
-    const row = [];
     for (let j = 0; j < numCols; j++) {
-      row.push({ x: i, y: j, z: Math.random() * 100 });
+      data.push({ x: i, y: j, z: i === numRows - 1 ? 80 : Math.random() * 100 });
     }
-    data.push(row);
   }
   return data;
 }
 const data = getData();
 
 export default class Demo extends Component {
-  static displayName = 'DemoTreemap';
+  static displayName = 'DemoHeatmap';
 
   render() {
     return (
@@ -389,7 +342,7 @@ export default class Demo extends Component {
         }}
       >
         <Heatmap data={data} />
-        <XAxis type='number' dataKey='x' name='date' />
+        <XAxis type='number' dataKey='x' name='date' domain={[0, 185]} />
         <YAxis type='number' dataKey='y' name='position' />
         <ZAxis
           type='number'
