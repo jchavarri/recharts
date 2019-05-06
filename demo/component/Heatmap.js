@@ -10,6 +10,8 @@ import YAxis from '../../src/cartesian/YAxis';
 import ZAxis from '../../src/cartesian/ZAxis';
 import generateCategoricalChart from '../../src/chart/generateCategoricalChart';
 import { formatAxisMap } from '../../src/util/CartesianUtils';
+import { getOffset, calculateChartCoordinate } from '../../src/util/DOMUtils';
+import { getAnyElementOfObject } from '../../src/util/DataUtils';
 import {
   PRESENTATION_ATTRIBUTES,
   EVENT_ATTRIBUTES,
@@ -23,6 +25,8 @@ import { getCateCoordinateOfLine } from '../../src/util/ChartUtils';
 function rect(props) {
   const { ctx, x, y, width, height, fill } = props;
   ctx.fillStyle = fill;
+  ctx.strokeStyle = fill;
+  ctx.strokeRect(x, y, width, height);
   ctx.fillRect(x, y, width, height);
 }
 
@@ -88,19 +92,7 @@ class Heatmap extends Component {
       PropTypes.element,
       PropTypes.func
     ]),
-    points: PropTypes.arrayOf(
-      PropTypes.shape({
-        cx: PropTypes.number,
-        cy: PropTypes.number,
-        size: PropTypes.number,
-        node: PropTypes.shape({
-          x: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
-          y: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
-          z: PropTypes.oneOfType([PropTypes.number, PropTypes.string])
-        }),
-        payload: PropTypes.any
-      })
-    ),
+    points: PropTypes.object,
     hide: PropTypes.bool,
 
     isAnimationActive: PropTypes.bool,
@@ -158,7 +150,7 @@ class Heatmap extends Component {
     const xBandSize = xAxis.scale.bandwidth ? xAxis.scale.bandwidth() : 0;
     const yBandSize = yAxis.scale.bandwidth ? yAxis.scale.bandwidth() : 0;
 
-    const points = displayedData.map((entry, index) => {
+    const points = displayedData.reduce((acc, entry, index) => {
       const z = (!_.isNil(zAxisDataKey) && entry[zAxisDataKey]) || '-';
 
       const cx = getCateCoordinateOfLine({
@@ -178,12 +170,17 @@ class Heatmap extends Component {
         dataKey: yAxisDataKey
       });
 
-      return {
-        cx,
-        cy,
-        z
-      };
-    });
+      const x = entry[xAxisDataKey];
+      const y = entry[yAxisDataKey];
+      if (acc[y] === undefined) {
+        acc[y] = {};
+      }
+      if (acc[y][x] === undefined) {
+        acc[y][x] = {};
+      }
+      acc[y][x] = { cx, cy, z };
+      return acc;
+    }, {});
 
     return {
       onMouseLeave: onItemMouseLeave,
@@ -217,15 +214,18 @@ class Heatmap extends Component {
 
     const cellWidth = width / xAxis.niceTicks[xAxis.niceTicks.length - 1];
     const cellHeight = height / yAxis.niceTicks[yAxis.niceTicks.length - 1];
-
-    points.forEach(d =>
-      rect({
-        ctx,
-        x: d.cx - left,
-        y: d.cy - top,
-        width: cellWidth,
-        height: cellHeight,
-        fill: colorScale(d.z)
+    console.log(points);
+    Object.keys(points).forEach(row =>
+      Object.keys(points[row]).forEach(col => {
+        const d = points[row][col];
+        rect({
+          ctx,
+          x: d.cx - left,
+          y: d.cy - top,
+          width: cellWidth,
+          height: cellHeight,
+          fill: colorScale(d.z)
+        });
       })
     );
   }
@@ -239,12 +239,19 @@ class Heatmap extends Component {
     const cellHeight = height / yAxis.niceTicks[yAxis.niceTicks.length - 1];
     const xCoord = Math.ceil(event.clientX - bounds.left);
     const yCoord = Math.ceil(event.clientY - bounds.top);
-    const z = Math.ceil(Math.random() * 2000);
-    const x = Math.round(xCoord / cellWidth);
-    const y = Math.round(yCoord / cellHeight);
-    if (this.hoveredX !== x || this.hoveredY !== y) {
+
+    const containerOffset = getOffset(event.target);
+    const e = calculateChartCoordinate(event, containerOffset);
+
+    const xScale = xAxis.scale;
+    const yScale = yAxis.scale;
+    const x = xScale && xScale.invert ? Math.floor(xScale.invert(e.chartX + left)) : null;
+    const y = yScale && yScale.invert ? Math.floor(yScale.invert(e.chartY + top)) : null;
+
+    const z = points[y] && points[y][x] && points[y][x].z;
+    if (z !== undefined && this.hoveredX !== x || this.hoveredY !== y) {
       this.hoveredX = x;
-      this.hoveredY = x;
+      this.hoveredY = y;
       const tooltipPayload = [
         {
           name: xAxis.name || xAxis.dataKey,
@@ -314,12 +321,12 @@ const HeatmapChart = generateCategoricalChart({
 });
 
 function getData() {
-  const numRows = 185;
-  const numCols = 100;
+  const numCols = 185;
+  const numRows = 100;
   const data = [];
-  for (let i = 0; i < numRows; i++) {
-    for (let j = 0; j < numCols; j++) {
-      data.push({ x: i, y: j, z: i === numRows - 1 ? 80 : Math.random() * 100 });
+  for (let i = 0; i < numCols; i++) {
+    for (let j = 0; j < numRows; j++) {
+      data.push({ x: i, y: j, z: i === numCols - 1 ? 80 : Math.random() * 5 * j * 3 + 2 });
     }
   }
   return data;
@@ -342,12 +349,12 @@ export default class Demo extends Component {
         }}
       >
         <Heatmap data={data} />
-        <XAxis type='number' dataKey='x' name='date' domain={[0, 185]} />
+        <XAxis type='number' dataKey='x' name='date' />
         <YAxis type='number' dataKey='y' name='position' />
         <ZAxis
           type='number'
           dataKey='z'
-          range={[50, 1200]}
+          range={[0, 1200]}
           name='score'
           unit='km'
         />
